@@ -1,6 +1,10 @@
-# dsh-account-balance
+# dsh-balance-ball
 
 DeepSeek Harness 插件：一个可拖动的悬浮球，常驻显示你的 **DeepSeek 账户余额**，点击展开详情面板，查看实时价格、今日价格走势和 token 消耗估算。
+
+![悬浮球](assets/screenshot-ball.png)
+
+![详情面板](assets/screenshot-panel.png)
 
 ## 功能
 
@@ -15,13 +19,13 @@ DeepSeek Harness 插件：一个可拖动的悬浮球，常驻显示你的 **Dee
 ### 方式一：npm
 
 ```bash
-dsh plugin add dsh-account-balance
+dsh plugin add dsh-balance-ball
 ```
 
 ### 方式二：GitHub
 
 ```bash
-dsh plugin --profile web add github:<你的用户名>/dsh-account-balance
+dsh plugin --profile web add github:StarRob1n/dsh-account-balance
 ```
 
 安装后重启 DSH，右下角会出现悬浮球。
