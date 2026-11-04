@@ -1,4 +1,4 @@
 - insert:
-    - id: dsh-account-balance
-      name: dsh-account-balance
+    - id: dsh-balance-ball
+      name: dsh-balance-ball
       config: {}

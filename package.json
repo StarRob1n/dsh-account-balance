@@ -1,5 +1,5 @@
 {
-  "name": "dsh-account-balance",
+  "name": "dsh-balance-ball",
   "version": "0.1.0",
   "description": "悬浮球显示 DeepSeek 账户余额（OAuth 登录），附带实时价格、今日价格走势与 token 消耗估算区间。可拖动、可固定，点击展开详情面板。",
   "type": "module",
