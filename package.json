@@ -41,6 +41,20 @@
     }
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StarRob1n/dsh-account-balance.git"
+  },
+  "homepage": "https://github.com/StarRob1n/dsh-account-balance#readme",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "balance",
+    "billing",
+    "usage"
+  ],
   "engines": {
     "node": ">=20",
     "dsh": ">=0.2.0"
