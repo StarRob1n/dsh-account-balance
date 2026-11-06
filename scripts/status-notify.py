@@ -18,7 +18,6 @@ import ssl
 import sys
 import urllib.request
 from datetime import datetime, timezone
-from email.header import Header
 from email.message import EmailMessage
 
 STATE_PATH = os.environ.get("STATE_PATH", ".state/notify-state.json")
@@ -208,7 +207,9 @@ def send_mail(subject, body):
         return False
 
     msg = EmailMessage()
-    msg["Subject"] = Header(subject, "utf-8")
+    # EmailMessage's default policy encodes non-ASCII headers itself; assigning a
+    # Header object here raises "TypeError: 'Header' object is not subscriptable".
+    msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = os.environ.get("MAIL_TO") or user
     msg.set_content(body, charset="utf-8")
