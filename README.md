@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-balance-ball?color=4c8bf5)](https://www.npmjs.com/package/dsh-balance-ball)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-balance-ball)](https://www.npmjs.com/package/dsh-balance-ball)
 [![License: MIT](https://img.shields.io/npm/l/dsh-balance-ball)](https://github.com/StarRob1n/dsh-account-balance/blob/main/LICENSE)
+[![awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-%E5%B7%B2%E6%94%B6%E5%BD%95-8a2be2)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
 DeepSeek Harness 插件：一个可拖动的悬浮球，常驻显示你的 **DeepSeek 账户余额**，点击展开详情面板，查看实时价格、今日价格走势和 token 消耗估算。
 

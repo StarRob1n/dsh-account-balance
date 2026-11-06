@@ -1,35 +1,40 @@
 #!/usr/bin/env python3
-"""Check dsh-balance-ball's community status and email a summary on change.
+"""Weekly digest for dsh-balance-ball.
 
-Run from GitHub Actions (see .github/workflows/notify.yml). Sends mail through
-QQ Mail SMTP using an authorization code (never an account password).
+Runs from GitHub Actions (see .github/workflows/notify.yml) once a week and mails
+a short summary of how the plugin is doing: npm downloads, GitHub stars, open
+issues, and whether the community directory listings are still live.
+
+Mail goes out through QQ Mail SMTP using an authorization code (never an account
+password) to the address configured in QQ_SMTP_USER.
 
 Behaviour:
-  - First run ever      -> send an "enabled" mail so the user can confirm setup
-  - Any meaningful diff -> send a change mail (merge, comment, check colours)
-  - Monday runs         -> send the weekly digest even when nothing changed
-  - Otherwise           -> stay silent
+  - first run ever  -> send an "enabled" mail so setup can be confirmed
+  - FORCE_SEND=1    -> send regardless of the weekday (used by manual dispatch)
+  - Monday runs     -> send the weekly digest
+  - otherwise       -> stay silent
 """
 
 import json
 import os
 import smtplib
 import ssl
-import sys
 import urllib.request
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
 STATE_PATH = os.environ.get("STATE_PATH", ".state/notify-state.json")
 
-UPSTREAM_OWNER = "awesome-dsh-plugin"
-UPSTREAM_REPO = "awesome-dsh-plugin"
-PR_NUMBER = 12125
-
 PLUGIN_REPO = "StarRob1n/dsh-account-balance"
 PACKAGE = "dsh-balance-ball"
+
+UPSTREAM = "awesome-dsh-plugin/awesome-dsh-plugin"
+LISTING_PATH = "data/plugins/StarRob1n__dsh-account-balance.yml"
+LISTING_URL = f"https://github.com/{UPSTREAM}/blob/main/{LISTING_PATH}"
+
 DSHBASE_URL = "https://dshbase.com/plugins/dsh-balance-ball/"
-PR_URL = f"https://github.com/{UPSTREAM_OWNER}/{UPSTREAM_REPO}/pull/{PR_NUMBER}"
+REPO_URL = f"https://github.com/{PLUGIN_REPO}"
+NPM_URL = f"https://www.npmjs.com/package/{PACKAGE}"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
@@ -50,7 +55,7 @@ def http_json(url, auth=False):
 def try_json(url, auth=False, default=None):
     try:
         return http_json(url, auth=auth)
-    except Exception as exc:  # network hiccup must not break the whole run
+    except Exception as exc:  # a network hiccup must not break the whole run
         log(f"warn: {url} -> {exc}")
         return default
 
@@ -66,46 +71,27 @@ def page_ok(url):
         return False
 
 
+def npm_downloads(period):
+    data = try_json(f"https://api.npmjs.org/downloads/point/{period}/{PACKAGE}") or {}
+    return data.get("downloads")
+
+
 def collect():
-    state = {}
-
-    pr = try_json(f"https://api.github.com/repos/{UPSTREAM_OWNER}/{UPSTREAM_REPO}/pulls/{PR_NUMBER}", auth=True)
-    if pr:
-        state["pr_state"] = pr.get("state")
-        state["pr_merged"] = bool(pr.get("merged"))
-        state["pr_updated"] = pr.get("updated_at")
-        head = (pr.get("head") or {}).get("sha")
-        state["head_sha"] = head
-        if head:
-            runs = try_json(
-                f"https://api.github.com/repos/{UPSTREAM_OWNER}/{UPSTREAM_REPO}/commits/{head}/check-runs",
-                auth=True,
-            ) or {}
-            for run in runs.get("check_runs") or []:
-                name = run.get("name")
-                if name == "Submission gate":
-                    state["gate"] = run.get("conclusion") or run.get("status")
-                    state["gate_title"] = (run.get("output") or {}).get("title")
-                    state["gate_at"] = run.get("completed_at")
-                elif name == "check":
-                    state["check"] = run.get("conclusion") or run.get("status")
-
-    comments = try_json(
-        f"https://api.github.com/repos/{UPSTREAM_OWNER}/{UPSTREAM_REPO}/issues/{PR_NUMBER}/comments",
-        auth=True,
-        default=[],
-    ) or []
-    state["comment_ids"] = sorted(int(c["id"]) for c in comments if c.get("id"))
-    state["comment_count"] = len(comments)
-    state["last_comment_by"] = comments[-1]["user"]["login"] if comments else None
+    state = {"checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 
     repo = try_json(f"https://api.github.com/repos/{PLUGIN_REPO}", auth=True) or {}
     state["stars"] = repo.get("stargazers_count")
     state["forks"] = repo.get("forks_count")
     state["open_issues"] = repo.get("open_issues_count")
+    state["pushed_at"] = repo.get("pushed_at")
 
-    dl = try_json(f"https://api.npmjs.org/downloads/point/last-week/{PACKAGE}") or {}
-    state["downloads_week"] = dl.get("downloads")
+    state["downloads_week"] = npm_downloads("last-week")
+    state["downloads_day"] = npm_downloads("last-day")
+
+    listing = try_json(
+        f"https://api.github.com/repos/{UPSTREAM}/contents/{LISTING_PATH}", auth=True
+    ) or {}
+    state["listed"] = bool(listing.get("sha"))
 
     state["dshbase_ok"] = page_ok(DSHBASE_URL)
 
@@ -129,73 +115,52 @@ def save_state(state):
         json.dump(state, fh, ensure_ascii=False, indent=2)
 
 
-def describe(state):
-    gate = state.get("gate") or "缺失"
-    check = state.get("check") or "缺失"
-    return [
-        f"PR #{PR_NUMBER}：{state.get('pr_state')}" + ("（已合并）" if state.get("pr_merged") else ""),
-        f"评论数：{state.get('comment_count', 0)}",
-        f"Submission gate：{gate}" + (f"（{state['gate_title']}）" if state.get("gate_title") else ""),
-        f"check：{check}",
-        f"star：{state.get('stars')} / fork：{state.get('forks')} / issue：{state.get('open_issues')}",
-        f"npm 近 7 天下载：{state.get('downloads_week')}",
-        f"dshbase 页面：{'在线' if state.get('dshbase_ok') else '异常'}",
-    ]
+def with_delta(label, new, old, unit=""):
+    """Render 'npm 近 7 天下载：811（上次 795，+16）' style lines."""
+    shown = "未知" if new is None else f"{new}{unit}"
+    if new is None or old is None:
+        return f"{label}：{shown}"
+    diff = new - old
+    if diff == 0:
+        change = "持平"
+    else:
+        change = f"{'+' if diff > 0 else ''}{diff}{unit}"
+    return f"{label}：{shown}（上次 {old}{unit}，{change}）"
 
 
-def diff_events(old, new):
-    """Return human-readable lines for every meaningful change."""
-    events = []
+def summary_text(state, old):
+    old = old or {}
+    lines = ["【本周数据】"]
 
-    if new.get("pr_merged") and not old.get("pr_merged"):
-        events.append("🎉 PR 已合并，插件正式进入 awesome-dsh-plugin 目录")
-    if old.get("pr_state") != new.get("pr_state") and not new.get("pr_merged"):
-        events.append(f"PR 状态变化：{old.get('pr_state')} → {new.get('pr_state')}")
+    week = state.get("downloads_week")
+    day = state.get("downloads_day")
+    lines.append("- " + with_delta("npm 近 7 天下载", week, old.get("downloads_week")))
+    lines.append(f"- npm 昨日下载：{'未知' if day is None else day}")
+    lines.append("- " + with_delta("GitHub star", state.get("stars"), old.get("stars")))
+    lines.append("- " + with_delta("未关闭 issue/PR", state.get("open_issues"), old.get("open_issues")))
+    lines.append(f"- awesome-dsh-plugin 目录：{'已收录' if state.get('listed') else '未找到'}")
+    lines.append(f"- dshbase 目录页：{'在线' if state.get('dshbase_ok') else '异常'}")
 
-    old_ids = set(old.get("comment_ids") or [])
-    new_ids = set(new.get("comment_ids") or [])
-    added = new_ids - old_ids
-    if added:
-        events.append(f"新增 {len(added)} 条 PR 评论（最后一条来自 {new.get('last_comment_by')}）")
-
-    for field, label in (("gate", "Submission gate"), ("check", "check")):
-        before, after = old.get(field), new.get(field)
-        if before != after and after:
-            line = f"{label}：{before} → {after}"
-            if field == "gate" and new.get("gate_title"):
-                line += f"（{new['gate_title']}）"
-            events.append(line)
-
-    if old.get("dshbase_ok") and not new.get("dshbase_ok"):
-        events.append("⚠️ dshbase 插件页面变为不可访问")
-
-    return events
-
-
-def summary_text(state, events, weekly):
-    lines = []
-    if events:
-        lines.append("【变化】")
-        lines.extend(f"- {e}" for e in events)
+    if old.get("listed") and not state.get("listed"):
         lines.append("")
+        lines.append("提醒：插件条目在上游 awesome 目录里查不到了，建议确认是否被误删。")
+    if old.get("dshbase_ok") and not state.get("dshbase_ok"):
+        lines.append("")
+        lines.append("提醒：dshbase 插件页面打不开，也可能只是临时抖动。")
 
-    lines.append("【当前状态】")
-    lines.extend(f"- {s}" for s in describe(state))
     lines.append("")
-
-    if weekly:
-        lines.append("【每周数据】")
-        lines.append(f"- npm 近 7 天下载量：{state.get('downloads_week')}")
-        lines.append(f"- star：{state.get('stars')}")
-        lines.append(
-            "- 提示：下载量里既有真人安装，也有镜像站与爬虫抓取。"
-            "发布日尖峰、各版本下载量均匀是机器流量特征；"
-            "连续几天稳定在数十次更可能是真实使用。"
-        )
-        lines.append("")
-
-    lines.append(f"链接：{PR_URL}")
-    lines.append(f"dshbase：{DSHBASE_URL}")
+    lines.append("【说明】")
+    lines.append(
+        "下载量里既有真人安装，也有镜像站与爬虫抓取。"
+        "发布日尖峰、各版本下载量均匀是机器流量特征；"
+        "连续几周稳定在数十次更可能是真实使用。"
+    )
+    lines.append("")
+    lines.append("【链接】")
+    lines.append(f"- 仓库：{REPO_URL}")
+    lines.append(f"- npm：{NPM_URL}")
+    lines.append(f"- awesome 目录条目：{LISTING_URL}")
+    lines.append(f"- dshbase：{DSHBASE_URL}")
     return "\n".join(lines)
 
 
@@ -203,7 +168,7 @@ def send_mail(subject, body):
     user = os.environ.get("QQ_SMTP_USER")
     password = os.environ.get("QQ_SMTP_PASS")
     if not user or not password:
-        log("QQ_SMTP_USER / QQ_SMTP_PASS 未配置，跳过发信")
+        log("QQ_SMTP_USER / QQ_SMTP_PASS missing, skipping mail")
         return False
 
     msg = EmailMessage()
@@ -224,35 +189,32 @@ def send_mail(subject, body):
 
 def main():
     state = collect()
-    if state.get("pr_state") is None and state.get("downloads_week") is None:
+    if state.get("stars") is None and state.get("downloads_week") is None:
         log("all lookups failed; nothing to report")
         return
 
     old = load_state()
     save_state(state)
 
-    now_utc = datetime.now(timezone.utc)
-    weekly = now_utc.weekday() == 0
+    forced = (os.environ.get("FORCE_SEND") or "").lower() in ("1", "true", "yes")
+    first_run = old is None
+    weekly = datetime.now(timezone.utc).weekday() == 0
 
-    if old is None:
-        subject = f"[{PACKAGE}] 状态通知已启用"
-        body = "状态邮件通知已成功配置。以后只在有变化时发信，每周一附一次数据摘要。\n\n" + summary_text(state, [], True)
-        send_mail(subject, body)
+    if not (forced or first_run or weekly):
+        log("not Monday and not forced; staying quiet")
         return
 
-    events = diff_events(old, state)
-    if events:
-        head = events[0]
-        subject = f"[{PACKAGE}] {head}"
-        log(f"changes: {len(events)}")
-        send_mail(subject, summary_text(state, events, weekly))
-        return
+    if first_run:
+        subject = f"[{PACKAGE}] 周报已启用"
+        body = "每周一的数据摘要已配置完成，之后每周一封。\n\n" + summary_text(state, old)
+    elif forced:
+        subject = f"[{PACKAGE}] 周报测试"
+        body = "这是一封手动触发的测试邮件，用于确认链路正常。\n\n" + summary_text(state, old)
+    else:
+        subject = f"[{PACKAGE}] 每周数据摘要"
+        body = summary_text(state, old)
 
-    if weekly:
-        send_mail(f"[{PACKAGE}] 每周数据摘要", summary_text(state, [], True))
-        return
-
-    log("no changes; staying quiet")
+    send_mail(subject, body)
 
 
 if __name__ == "__main__":

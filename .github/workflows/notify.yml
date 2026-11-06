@@ -2,8 +2,8 @@ name: Status notify
 
 on:
   schedule:
-    # 02:00 UTC = 10:00 Asia/Shanghai
-    - cron: "0 2 * * *"
+    # Monday 02:00 UTC = Monday 10:00 Asia/Shanghai
+    - cron: "0 2 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -24,16 +24,18 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .state
-          key: notify-state-v2-${{ github.run_id }}
+          key: notify-state-v3-${{ github.run_id }}
           restore-keys: |
-            notify-state-v2-
+            notify-state-v3-
 
-      - name: Check status and notify
+      - name: Send weekly digest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           QQ_SMTP_USER: ${{ secrets.QQ_SMTP_USER }}
           QQ_SMTP_PASS: ${{ secrets.QQ_SMTP_PASS }}
           STATE_PATH: .state/notify-state.json
+          # A manual dispatch always sends a mail so the chain can be verified.
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python3 scripts/status-notify.py
 
       - name: Save state
@@ -41,4 +43,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .state
-          key: notify-state-v2-${{ github.run_id }}
+          key: notify-state-v3-${{ github.run_id }}
