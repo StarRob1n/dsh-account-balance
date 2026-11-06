@@ -1,0 +1,43 @@
+name: Status notify
+
+on:
+  schedule:
+    # 02:00 UTC = 10:00 Asia/Shanghai
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: status-notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore previous state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: notify-state-${{ github.run_id }}
+          restore-keys: |
+            notify-state-
+
+      - name: Check status and notify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QQ_SMTP_USER: ${{ secrets.QQ_SMTP_USER }}
+          QQ_SMTP_PASS: ${{ secrets.QQ_SMTP_PASS }}
+          STATE_PATH: .state/notify-state.json
+        run: python3 scripts/status-notify.py
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: notify-state-${{ github.run_id }}
